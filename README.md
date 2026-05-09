@@ -10,6 +10,7 @@ there is no backend, no upload, no persistence.
 ## Features
 
 - Drag-and-drop or browse to add JPEGs
+- **Import from a public Google Drive folder** (see [Drive import](#importing-from-google-drive))
 - Automatic GPS coordinate extraction from EXIF metadata
 - Manual lat/lng entry for photos without GPS data
 - Photo thumbnails as map markers, with circular crops
@@ -51,12 +52,51 @@ containing the photo as an `<img>` clipped to a circle. Overlapping markers
 are detected by projecting their lat/lng into screen-space pixels after every
 zoom and grouping any that fall within ~36 px of each other.
 
+## Importing from Google Drive
+
+Cartograph can pull all images out of a public Google Drive folder. Click
+**Import from Google Drive** below the dropzone and provide:
+
+1. **Folder URL or ID** — anything like
+   `https://drive.google.com/drive/folders/<ID>` or just `<ID>`. The folder
+   must be shared as **Anyone with the link can view**.
+2. **Drive API key** — a free key from your own Google Cloud project.
+   It is stored in `localStorage` on your machine and never sent anywhere
+   except to Google's API.
+
+The app lists every image in the folder, downloads each one, then runs them
+through the same EXIF/GPS pipeline as locally-added files. Subfolders are
+not traversed.
+
+### One-time API key setup
+
+1. Open the [Google Cloud console](https://console.cloud.google.com/) and
+   create (or select) a project.
+2. Go to **APIs & Services → Library**, search for **Google Drive API**,
+   and click **Enable**.
+3. Go to **APIs & Services → Credentials → Create credentials → API key**.
+   Copy the generated key.
+4. *(Recommended)* Click the new key and restrict it to the **Google Drive
+   API** under "API restrictions", and to your origin under "Application
+   restrictions".
+5. Paste the key into the Drive API key field. It will be remembered for
+   future sessions.
+
+If imports fail, the most common causes are: the folder is not set to
+"Anyone with the link can view"; the Drive API has not been enabled for
+the project; or the API key has restrictions that block this origin.
+
 ## Privacy
 
-Cartograph runs entirely in your browser. Your photos and their GPS data are
-never sent to any server. The only network requests the app makes are for the
-CDN-hosted libraries (Leaflet, exifr) and the map tiles themselves
-(CartoDB / OpenStreetMap).
+Cartograph runs entirely in your browser. Locally-added photos and their GPS
+data are never sent to any server. The only network requests the app makes
+are for the CDN-hosted libraries (Leaflet, exifr) and the map tiles
+themselves (CartoDB / OpenStreetMap).
+
+If you use the **Google Drive import** feature, your Drive API key and the
+folder ID are sent to `googleapis.com` in order to list and download the
+images — that is unavoidable, but the requests go directly from your browser
+to Google.
 
 ## License
 

@@ -195,6 +195,72 @@
   }
   .manual-entry button:hover { background: var(--accent); border-color: var(--accent); }
 
+  /* Drive import */
+  .drive-import { margin: 0 18px 18px; }
+  .drive-toggle {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    color: var(--ink-soft);
+    padding: 10px 14px;
+    font-family: var(--mono); font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: all 0.15s ease;
+  }
+  .drive-toggle:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-alt); }
+  .drive-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+  .drive-toggle .chev { transition: transform 0.18s ease; }
+  .drive-import.open .drive-toggle .chev { transform: rotate(180deg); }
+  .drive-form {
+    display: none;
+    margin-top: 8px;
+    padding: 14px;
+    background: var(--bg-alt);
+    border: 1px solid var(--line-strong);
+  }
+  .drive-import.open .drive-form { display: block; }
+  .drive-field { margin-bottom: 10px; }
+  .drive-field:last-child { margin-bottom: 0; }
+  .drive-field label {
+    display: block;
+    font-family: var(--mono); font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink-muted); margin-bottom: 4px;
+  }
+  .drive-field input {
+    width: 100%; padding: 7px 10px;
+    border: 1px solid var(--line); background: var(--bg);
+    font-family: var(--mono); font-size: 11px; color: var(--ink);
+  }
+  .drive-field input:focus { outline: none; border-color: var(--accent); }
+  .drive-help {
+    display: block; margin-top: 6px;
+    font-family: var(--mono); font-size: 9.5px;
+    color: var(--ink-muted); text-decoration: none;
+    border-bottom: 1px dotted var(--ink-muted);
+    width: fit-content;
+  }
+  .drive-help:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .drive-fetch {
+    width: 100%; padding: 8px;
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    border: 1px solid var(--ink); background: var(--ink); color: var(--bg);
+    cursor: pointer;
+  }
+  .drive-fetch:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+  .drive-fetch:disabled { opacity: 0.5; cursor: not-allowed; }
+  .drive-status {
+    margin-top: 8px;
+    font-family: var(--mono); font-size: 10px;
+    color: var(--ink-soft); min-height: 14px;
+    line-height: 1.4;
+  }
+  .drive-status.error { color: var(--accent); }
+  .drive-status.ok { color: var(--ok); }
+
   /* MAP */
   .map-container {
     position: relative; overflow: hidden;
@@ -381,6 +447,26 @@
         </div>
         <div class="dropzone-title">Drop photos here</div>
         <div class="dropzone-hint">or click to browse</div>
+      </div>
+      <div class="drive-import" id="drive-import">
+        <button class="drive-toggle" id="drive-toggle" type="button">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7.71 3.5L1.15 15l3.42 6h13.32l3.42-6L14.71 3.5H7.71zm0 1.5h6.58L20 15.5h-6.58L7.71 5zM6.71 6.21L12.86 17H6.5l-3.86-7L6.71 6.21zM9.36 18h11.71l-2.93 5H6.43L9.36 18z"/></svg>
+          <span>Import from Google Drive</span>
+          <span class="chev">▾</span>
+        </button>
+        <div class="drive-form">
+          <div class="drive-field">
+            <label for="drive-folder">Folder URL or ID</label>
+            <input id="drive-folder" type="text" placeholder="https://drive.google.com/drive/folders/...">
+          </div>
+          <div class="drive-field">
+            <label for="drive-key">Drive API key</label>
+            <input id="drive-key" type="password" placeholder="AIza... (saved locally)">
+            <a class="drive-help" href="https://developers.google.com/workspace/drive/api/quickstart/js" target="_blank" rel="noopener">How to get an API key →</a>
+          </div>
+          <button class="drive-fetch" id="drive-fetch" type="button">Import folder</button>
+          <div class="drive-status" id="drive-status"></div>
+        </div>
       </div>
       <div class="list-header">
         <h2>Collection</h2>
@@ -962,6 +1048,128 @@ exportBtn.addEventListener('click', exportGeoJson);
 $('zoom-in').addEventListener('click', () => map.zoomIn());
 $('zoom-out').addEventListener('click', () => map.zoomOut());
 $('zoom-reset').addEventListener('click', resetView);
+
+// Google Drive import
+const DRIVE_KEY_STORAGE = 'cartograph_drive_key';
+const driveImport = $('drive-import');
+const driveToggle = $('drive-toggle');
+const driveFolderInput = $('drive-folder');
+const driveKeyInput = $('drive-key');
+const driveFetchBtn = $('drive-fetch');
+const driveStatus = $('drive-status');
+
+driveKeyInput.value = localStorage.getItem(DRIVE_KEY_STORAGE) || '';
+
+driveToggle.addEventListener('click', () => {
+  driveImport.classList.toggle('open');
+});
+
+function setDriveStatus(text, kind = '') {
+  driveStatus.textContent = text;
+  driveStatus.className = 'drive-status' + (kind ? ' ' + kind : '');
+}
+
+function extractFolderId(input) {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const m = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(trimmed)) return trimmed;
+  return null;
+}
+
+async function listDriveImages(folderId, apiKey) {
+  const all = [];
+  let pageToken = null;
+  do {
+    const url = new URL('https://www.googleapis.com/drive/v3/files');
+    url.searchParams.set('q', `'${folderId}' in parents and mimeType contains 'image/' and trashed = false`);
+    url.searchParams.set('key', apiKey);
+    url.searchParams.set('fields', 'nextPageToken,files(id,name,mimeType,size)');
+    url.searchParams.set('pageSize', '1000');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      const msg = errBody.error?.message || `Drive API responded ${res.status}`;
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    all.push(...(data.files || []));
+    pageToken = data.nextPageToken || null;
+  } while (pageToken);
+  return all;
+}
+
+async function fetchDriveImage(file, apiKey) {
+  const url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch ${file.name} (${res.status})`);
+  const blob = await res.blob();
+  return new File([blob], file.name, { type: file.mimeType || blob.type || 'image/jpeg' });
+}
+
+async function importFromDrive() {
+  const folderId = extractFolderId(driveFolderInput.value);
+  const apiKey = driveKeyInput.value.trim();
+
+  if (!folderId) {
+    setDriveStatus('Couldn’t recognize that as a Drive folder URL or ID.', 'error');
+    return;
+  }
+  if (!apiKey) {
+    setDriveStatus('Drive API key is required.', 'error');
+    return;
+  }
+
+  driveFetchBtn.disabled = true;
+  setDriveStatus('Listing folder contents…');
+
+  try {
+    const files = await listDriveImages(folderId, apiKey);
+    if (files.length === 0) {
+      setDriveStatus('No images found in this folder.', 'error');
+      return;
+    }
+
+    localStorage.setItem(DRIVE_KEY_STORAGE, apiKey);
+
+    setDriveStatus(`Found ${files.length} image${files.length === 1 ? '' : 's'}. Downloading…`);
+
+    const fetched = [];
+    let failed = 0;
+    for (let i = 0; i < files.length; i++) {
+      setDriveStatus(`Downloading ${i + 1} of ${files.length}: ${files[i].name}`);
+      try {
+        fetched.push(await fetchDriveImage(files[i], apiKey));
+      } catch (err) {
+        console.error('Drive fetch error:', err);
+        failed++;
+      }
+    }
+
+    if (fetched.length === 0) {
+      setDriveStatus('All downloads failed. Check folder sharing settings.', 'error');
+      return;
+    }
+
+    setDriveStatus(`Imported ${fetched.length} of ${files.length}${failed ? ` — ${failed} failed` : ''}.`, 'ok');
+    await addFiles(fetched);
+  } catch (err) {
+    console.error('Drive import failed:', err);
+    let hint = '';
+    if (/API key/i.test(err.message)) hint = ' Check that the Drive API is enabled for this key.';
+    else if (/not found|notFound/i.test(err.message)) hint = ' Folder ID not found, or the folder is not set to “Anyone with the link”.';
+    else if (/forbidden|insufficient/i.test(err.message)) hint = ' Folder may not be public, or the API key lacks Drive API access.';
+    setDriveStatus(`Import failed: ${err.message}.${hint}`, 'error');
+  } finally {
+    driveFetchBtn.disabled = false;
+  }
+}
+
+driveFetchBtn.addEventListener('click', importFromDrive);
+driveFolderInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') importFromDrive(); });
+driveKeyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') importFromDrive(); });
 
 if (typeof ResizeObserver !== 'undefined') {
   new ResizeObserver(() => map.invalidateSize()).observe(document.querySelector('.map-container'));

@@ -236,13 +236,31 @@
   }
   .drive-field input:focus { outline: none; border-color: var(--accent); }
   .drive-help {
-    display: block; margin-top: 6px;
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-top: 6px;
+    background: none; border: none; padding: 0;
     font-family: var(--mono); font-size: 9.5px;
-    color: var(--ink-muted); text-decoration: none;
+    color: var(--ink-muted); cursor: pointer;
     border-bottom: 1px dotted var(--ink-muted);
-    width: fit-content;
   }
   .drive-help:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .drive-help .chev { transition: transform 0.18s ease; }
+  .drive-help.open .chev { transform: rotate(180deg); }
+  .drive-help-steps {
+    display: none;
+    margin-top: 8px; padding: 10px 12px 10px 28px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 10px;
+    color: var(--ink-soft); line-height: 1.65;
+  }
+  .drive-help-steps.open { display: block; }
+  .drive-help-steps li { margin-bottom: 4px; }
+  .drive-help-steps li:last-child { margin-bottom: 0; }
+  .drive-help-steps code {
+    background: var(--bg-alt); padding: 1px 4px;
+    color: var(--ink); font-size: 9.5px;
+  }
   .drive-fetch {
     width: 100%; padding: 8px;
     font-family: var(--mono); font-size: 10px;
@@ -462,7 +480,17 @@
           <div class="drive-field">
             <label for="drive-key">Drive API key</label>
             <input id="drive-key" type="password" placeholder="AIza... (saved locally)">
-            <a class="drive-help" href="https://developers.google.com/workspace/drive/api/quickstart/js" target="_blank" rel="noopener">How to get an API key →</a>
+            <button class="drive-help" id="drive-help-toggle" type="button">
+              <span>How to get an API key</span>
+              <span class="chev">▾</span>
+            </button>
+            <ol class="drive-help-steps" id="drive-help-steps">
+              <li>Open <code>console.cloud.google.com</code> and sign in.</li>
+              <li>Create a new project (or pick one you already have).</li>
+              <li>In the left menu: <code>APIs &amp; Services → Library</code>. Search <code>Google Drive API</code> and click <code>Enable</code>.</li>
+              <li>Then <code>APIs &amp; Services → Credentials → Create credentials → API key</code>.</li>
+              <li>Copy the key (starts with <code>AIza</code>) and paste it above.</li>
+            </ol>
           </div>
           <button class="drive-fetch" id="drive-fetch" type="button">Import folder</button>
           <div class="drive-status" id="drive-status"></div>
@@ -1062,6 +1090,13 @@ driveKeyInput.value = localStorage.getItem(DRIVE_KEY_STORAGE) || '';
 
 driveToggle.addEventListener('click', () => {
   driveImport.classList.toggle('open');
+});
+
+const driveHelpToggle = $('drive-help-toggle');
+const driveHelpSteps = $('drive-help-steps');
+driveHelpToggle.addEventListener('click', () => {
+  driveHelpToggle.classList.toggle('open');
+  driveHelpSteps.classList.toggle('open');
 });
 
 function setDriveStatus(text, kind = '') {

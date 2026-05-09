@@ -514,6 +514,16 @@
   }
   .timeline-btn.show-all:hover { background: var(--ink); color: var(--bg); }
   .timeline-btn.show-all.armed { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .timeline-btn.mode {
+    width: auto; padding: 0 10px;
+    font-family: var(--mono); font-size: 9.5px;
+    font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    background: transparent; color: var(--ink);
+    border: 1px solid var(--ink);
+  }
+  .timeline-btn.mode:hover { background: var(--ink); color: var(--bg); }
+  .timeline-btn.mode.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .timeline-slider {
     flex: 1; min-width: 80px;
     -webkit-appearance: none; appearance: none;
@@ -690,6 +700,7 @@
       <div id="map"></div>
       <div class="timeline" id="timeline" hidden>
         <button class="timeline-btn" id="timeline-play" type="button" title="Autoplay">▶</button>
+        <button class="timeline-btn mode" id="timeline-mode" type="button" title="Switch playback pacing">TIME</button>
         <input type="range" min="0" max="1000" value="1000" step="1" class="timeline-slider" id="timeline-slider" aria-label="Timeline">
         <div class="timeline-label muted" id="timeline-label">—</div>
         <button class="timeline-btn show-all" id="timeline-show-all" type="button">Show All</button>
@@ -740,7 +751,7 @@
 
 const state = {
   photos: [], activeId: null, nextId: 1,
-  timeline: { active: false, cutoff: null, playing: false, _timer: null },
+  timeline: { active: false, cutoff: null, playing: false, _timer: null, mode: 'time' },
 };
 
 const DEFAULT_VIEW = { center: [20, 0], zoom: 2 };
@@ -1047,6 +1058,16 @@ function updateTimelineUI() {
 
   playBtn.textContent = state.timeline.playing ? '⏸' : '▶';
   playBtn.title = state.timeline.playing ? 'Pause' : 'Autoplay';
+
+  const modeBtn = $('timeline-mode');
+  if (modeBtn) {
+    const even = state.timeline.mode === 'even';
+    modeBtn.textContent = even ? 'EVEN' : 'TIME';
+    modeBtn.classList.toggle('active', even);
+    modeBtn.title = even
+      ? 'Even pacing: each photo gets equal screen time. Click for real-time.'
+      : 'Real-time pacing: gaps between photos are preserved. Click for even pacing.';
+  }
 }
 
 const AUTOPLAY_DURATION_MS = 9000;
@@ -1063,10 +1084,47 @@ function startAutoplay() {
   }
 
   state.timeline.playing = true;
-  const stepValue = ((range.max - range.min) / AUTOPLAY_DURATION_MS) * AUTOPLAY_TICK_MS;
+
+  // In 'even' mode the cutoff advances in photo-units so each photo gets
+  // 1/N-th of the playback duration regardless of real-time gaps.
+  let photoTimes = null;
+  if (state.timeline.mode === 'even') {
+    photoTimes = state.photos
+      .filter((p) => p.hasGps)
+      .map(photoTime)
+      .filter((t) => !isNaN(t))
+      .sort((a, b) => a - b);
+    if (photoTimes.length < 2) photoTimes = null;
+  }
+
+  const totalTicks = AUTOPLAY_DURATION_MS / AUTOPLAY_TICK_MS;
+  const span = range.max - range.min || 1;
+  const timeStep = span / totalTicks;
+  const photoStep = photoTimes ? photoTimes.length / totalTicks : 0;
 
   state.timeline._timer = setInterval(() => {
-    state.timeline.cutoff = Math.min(state.timeline.cutoff + stepValue, range.max);
+    if (photoTimes) {
+      const N = photoTimes.length;
+      // Find current position in photo-space from the cutoff
+      let idx = 0;
+      while (idx < N - 1 && photoTimes[idx + 1] <= state.timeline.cutoff) idx++;
+      const segLen = idx + 1 < N ? Math.max(1, photoTimes[idx + 1] - photoTimes[idx]) : 1;
+      const within = idx + 1 < N
+        ? (state.timeline.cutoff - photoTimes[idx]) / segLen
+        : 0;
+      const next = idx + within + photoStep;
+
+      if (next >= N - 1) {
+        state.timeline.cutoff = photoTimes[N - 1];
+      } else {
+        const ni = Math.floor(next);
+        const nw = next - ni;
+        state.timeline.cutoff = photoTimes[ni] + nw * (photoTimes[ni + 1] - photoTimes[ni]);
+      }
+    } else {
+      state.timeline.cutoff = Math.min(state.timeline.cutoff + timeStep, range.max);
+    }
+
     redrawMarkers();
     updateTimelineUI();
     if (state.timeline.cutoff >= range.max) stopAutoplay();
@@ -1421,6 +1479,10 @@ $('timeline-play').addEventListener('click', () => {
   else startAutoplay();
 });
 $('timeline-show-all').addEventListener('click', showAllTimeline);
+$('timeline-mode').addEventListener('click', () => {
+  state.timeline.mode = state.timeline.mode === 'even' ? 'time' : 'even';
+  updateTimelineUI();
+});
 
 // ─── Share ─────────────────────────────────────────────────────────────────
 const mapContainer = document.querySelector('.map-container');
@@ -1513,8 +1575,19 @@ function waitForTiles(timeoutMs = 4000) {
   });
 }
 
+// After 'load' fires the browser still has to decode the image before it
+// can be drawn into a canvas. img.decode() forces that.
+async function decodeTiles() {
+  const tiles = tileLayer._tiles || {};
+  const imgs = Object.values(tiles).map((t) => t && t.el).filter(Boolean);
+  await Promise.all(
+    imgs.map((img) => (img.decode ? img.decode().catch(() => {}) : Promise.resolve())),
+  );
+}
+
 async function rasterizeMap() {
   await waitForTiles();
+  await decodeTiles();
   const bg = getComputedStyle(document.documentElement)
     .getPropertyValue('--map-water').trim() || '#d6cdb8';
   return await html2canvas(mapContainer, {
@@ -1581,14 +1654,47 @@ async function captureTimelineFrames(totalFrames, onProgress) {
   if (state.timeline.playing) stopAutoplay();
   state.timeline.active = true;
 
+  // Match the live autoplay's pacing mode so the recording feels like the
+  // playback the user just configured.
+  let photoTimes = null;
+  if (state.timeline.mode === 'even') {
+    photoTimes = state.photos
+      .filter((p) => p.hasGps)
+      .map(photoTime)
+      .filter((t) => !isNaN(t))
+      .sort((a, b) => a - b);
+    if (photoTimes.length < 2) photoTimes = null;
+  }
+
+  function cutoffForFrame(i) {
+    const progress = totalFrames === 1 ? 1 : i / (totalFrames - 1);
+    if (photoTimes) {
+      const N = photoTimes.length;
+      const pos = progress * (N - 1);
+      const idx = Math.min(N - 2, Math.floor(pos));
+      const within = pos - idx;
+      return photoTimes[idx] + within * (photoTimes[idx + 1] - photoTimes[idx]);
+    }
+    return range.min + progress * (range.max - range.min);
+  }
+
   mapContainer.classList.add('capturing');
 
   const frames = [];
   try {
+    // Warm-up pass: html2canvas's first call is cold (it builds its inline
+    // image cache as it runs), so without this the first 1-2 real frames
+    // can capture before all tile images are inlined. Discard the result.
+    state.timeline.cutoff = cutoffForFrame(0);
+    redrawMarkers();
+    updateTimelineUI();
+    await nextPaint();
+    await new Promise((r) => setTimeout(r, 200));
+    try { await rasterizeMap(); } catch (_) { /* ignore warm-up failures */ }
+
     for (let i = 0; i < totalFrames; i++) {
       if (shareCancelled) throw new Error('cancelled');
-      const progress = totalFrames === 1 ? 1 : i / (totalFrames - 1);
-      state.timeline.cutoff = range.min + progress * (range.max - range.min);
+      state.timeline.cutoff = cutoffForFrame(i);
       redrawMarkers();
       updateTimelineUI();
       await nextPaint();

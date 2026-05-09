@@ -72,6 +72,14 @@ of the map.
 - **▶ Play / ⏸ Pause** — autoplays the slider from the earliest to the
   latest photo over about 9 seconds, revealing markers as their timestamps
   pass. Click again to pause; dragging the slider also pauses.
+- **TIME / EVEN** — playback pacing toggle.
+  - **TIME** (default): the cutoff advances at a constant clock-time rate,
+    so empty stretches in your timeline play out as empty stretches.
+  - **EVEN**: the cutoff advances in *photo-units*, so each photo gets
+    `1/N`-th of the playback duration. Long gaps are skipped over and the
+    animation feels smooth even when your photos are clustered in time.
+  Recorded GIFs and videos use whichever mode is selected when you hit
+  Share.
 - **Show All** — clears the filter and brings every photo back, including
   those without timestamps. The button is highlighted whenever the filter
   is active.

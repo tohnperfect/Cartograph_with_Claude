@@ -233,6 +233,11 @@
 
   /* Photo markers (Leaflet divIcon) */
   .photo-marker { cursor: pointer; }
+  .photo-marker .marker-content {
+    position: absolute; inset: 0;
+    transition: transform 0.22s cubic-bezier(0.34, 1.36, 0.64, 1);
+    will-change: transform;
+  }
   .photo-marker .marker-bg {
     position: absolute; inset: 0;
     border-radius: 50%;
@@ -251,6 +256,20 @@
   }
   .photo-marker:hover .marker-bg { border-width: 3px; }
   .photo-marker.active .marker-bg { border-color: var(--ink); border-width: 3px; }
+  .photo-marker.fanned .marker-bg { box-shadow: 0 6px 14px rgba(26, 31, 46, 0.35); }
+
+  /* Visual hint that a marker is part of an overlapping group */
+  .photo-marker.in-cluster::after {
+    content: ""; position: absolute;
+    top: -3px; right: -3px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--ink);
+    border: 1.5px solid var(--bg);
+    transition: opacity 0.18s ease;
+    z-index: 2;
+  }
+  .photo-marker.fanned.in-cluster::after { opacity: 0; }
 
   /* Leaflet popup theming */
   .leaflet-popup.cartograph-popup .leaflet-popup-content-wrapper {
@@ -508,10 +527,121 @@ function escapeHtml(s) {
 
 const markers = new Map();
 
+// Spiderfy state: when several photos cluster within a small screen radius,
+// hovering any one of them fans them all out so each thumbnail is visible.
+const clusterOf = new Map();   // photo id -> cluster object (only for multi-clusters)
+let activeCluster = null;
+let collapseTimer = null;
+const CLUSTER_THRESHOLD_PX = 36;
+
+function computeClusters() {
+  clusterOf.clear();
+  document.querySelectorAll('.photo-marker.in-cluster').forEach((el) => {
+    el.classList.remove('in-cluster');
+  });
+  if (markers.size < 2) return;
+
+  const entries = [];
+  for (const [id, marker] of markers) {
+    entries.push({ id, marker, point: map.latLngToLayerPoint(marker.getLatLng()) });
+  }
+
+  const clusters = [];
+  for (const e of entries) {
+    let placed = false;
+    for (const c of clusters) {
+      const dx = e.point.x - c.cx;
+      const dy = e.point.y - c.cy;
+      if (Math.hypot(dx, dy) < CLUSTER_THRESHOLD_PX) {
+        c.entries.push(e);
+        const n = c.entries.length;
+        c.cx = (c.cx * (n - 1) + e.point.x) / n;
+        c.cy = (c.cy * (n - 1) + e.point.y) / n;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) clusters.push({ entries: [e], cx: e.point.x, cy: e.point.y });
+  }
+
+  for (const c of clusters) {
+    if (c.entries.length > 1) {
+      for (const e of c.entries) {
+        clusterOf.set(e.id, c);
+        const el = e.marker.getElement();
+        if (el) el.classList.add('in-cluster');
+      }
+    }
+  }
+}
+
+function fanCluster(cluster) {
+  const N = cluster.entries.length;
+  const radius = Math.max(36, 20 + N * 5);
+  cluster.entries.forEach((e, i) => {
+    const angle = (2 * Math.PI * i) / N - Math.PI / 2;
+    const dx = radius * Math.cos(angle);
+    const dy = radius * Math.sin(angle);
+    const el = e.marker.getElement();
+    if (!el) return;
+    const content = el.querySelector('.marker-content');
+    if (content) content.style.transform = `translate(${dx}px, ${dy}px)`;
+    el.classList.add('fanned');
+    el.style.zIndex = '1000';
+  });
+}
+
+function collapseCluster(cluster) {
+  cluster.entries.forEach((e) => {
+    const el = e.marker.getElement();
+    if (!el) return;
+    const content = el.querySelector('.marker-content');
+    if (content) content.style.transform = '';
+    el.classList.remove('fanned');
+    el.style.zIndex = '';
+  });
+}
+
+function clearFan() {
+  clearTimeout(collapseTimer);
+  collapseTimer = null;
+  if (activeCluster) {
+    collapseCluster(activeCluster);
+    activeCluster = null;
+  }
+}
+
+function handleMarkerOver(photoId) {
+  const c = clusterOf.get(photoId);
+  if (!c) return;
+  clearTimeout(collapseTimer);
+  collapseTimer = null;
+  if (activeCluster && activeCluster !== c) collapseCluster(activeCluster);
+  if (activeCluster !== c) {
+    fanCluster(c);
+    activeCluster = c;
+  }
+}
+
+function handleMarkerOut() {
+  if (!activeCluster) return;
+  clearTimeout(collapseTimer);
+  collapseTimer = setTimeout(() => {
+    if (activeCluster) {
+      collapseCluster(activeCluster);
+      activeCluster = null;
+    }
+    collapseTimer = null;
+  }, 140);
+}
+
+map.on('zoomstart', clearFan);
+map.on('zoomend', computeClusters);
+
 function buildMarkerIcon(photo, isActive) {
   return L.divIcon({
     className: 'photo-marker' + (isActive ? ' active' : ''),
-    html: `<div class="marker-bg"></div><img class="marker-img" src="${photo.dataUrl}" alt="">`,
+    html: `<div class="marker-content"><div class="marker-bg"></div><img class="marker-img" src="${photo.dataUrl}" alt=""></div>`,
     iconSize: [40, 40],
     iconAnchor: [20, 20],
     popupAnchor: [0, -20],
@@ -530,6 +660,7 @@ function buildPopupHtml(photo) {
 }
 
 function redrawMarkers() {
+  clearFan();
   const located = new Map(state.photos.filter((p) => p.hasGps).map((p) => [p.id, p]));
 
   for (const [id, marker] of markers) {
@@ -554,6 +685,8 @@ function redrawMarkers() {
         autoPanPadding: [40, 40],
       });
       marker.on('click', () => setActive(photo.id, true));
+      marker.on('mouseover', () => handleMarkerOver(photo.id));
+      marker.on('mouseout', handleMarkerOut);
       marker.on('popupclose', () => {
         if (state.activeId === photo.id) {
           state.activeId = null;
@@ -568,6 +701,8 @@ function redrawMarkers() {
       marker.setPopupContent(buildPopupHtml(photo));
     }
   }
+
+  computeClusters();
 }
 
 function syncActiveClasses() {
@@ -575,9 +710,8 @@ function syncActiveClasses() {
     el.classList.toggle('active', el.dataset.id === String(state.activeId));
   });
   for (const [id, marker] of markers) {
-    const photo = state.photos.find((p) => p.id === id);
-    if (!photo) continue;
-    marker.setIcon(buildMarkerIcon(photo, id === state.activeId));
+    const el = marker.getElement();
+    if (el) el.classList.toggle('active', id === state.activeId);
   }
 }
 

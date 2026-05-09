@@ -17,6 +17,10 @@ there is no backend, no upload, no persistence.
 - **Spiderfy on hover** — when multiple photos share a location, hovering
   any one of them fans the whole stack out so each thumbnail is visible
 - Click a marker for a popup with the full photo, coordinates, and timestamp
+- **Timeline scrubber** with autoplay — slide through time and watch photos
+  appear in the order they were taken (see [Timeline](#timeline))
+- **Share** the current view as a PNG, an animated GIF, or a WebM video
+  of the timeline playing back (see [Sharing](#sharing))
 - One-click **GeoJSON export** of all located photos
 - Live cursor coordinates and zoom controls
 - Sepia-toned base map for a warm, cartography-inspired aesthetic
@@ -39,18 +43,62 @@ from CDNs at runtime.
 
 ## Stack
 
-| Concern         | Library                                  |
-| --------------- | ---------------------------------------- |
-| Map rendering   | [Leaflet](https://leafletjs.com) 1.9.4   |
-| Tile source     | CartoDB Positron (with sepia CSS filter) |
-| EXIF extraction | [exifr](https://github.com/MikeKovarik/exifr) 7.1.3 |
-| Everything else | Vanilla HTML / CSS / JavaScript          |
+| Concern             | Library                                                                  |
+| ------------------- | ------------------------------------------------------------------------ |
+| Map rendering       | [Leaflet](https://leafletjs.com) 1.9.4                                   |
+| Tile source         | CartoDB Positron (with sepia CSS filter)                                 |
+| EXIF extraction     | [exifr](https://github.com/MikeKovarik/exifr) 7.1.3                      |
+| DOM → canvas        | [html-to-image](https://github.com/bubkoo/html-to-image) 1.11.13         |
+| GIF encoding        | [gif.js](https://github.com/jnordberg/gif.js) 0.2.0                      |
+| Video encoding      | Native `MediaRecorder` + `canvas.captureStream`                          |
+| Everything else     | Vanilla HTML / CSS / JavaScript                                          |
 
-State lives in a single `state` object; mutations are followed by explicit
-`render()` and/or `redrawMarkers()` calls. Markers are Leaflet `divIcon`s
-containing the photo as an `<img>` clipped to a circle. Overlapping markers
-are detected by projecting their lat/lng into screen-space pixels after every
-zoom and grouping any that fall within ~36 px of each other.
+State lives in a single `state` object (`photos`, `activeId`, `timeline`);
+mutations are followed by explicit `render()` and/or `redrawMarkers()` calls.
+Markers are Leaflet `divIcon`s containing the photo as an `<img>` clipped to a
+circle. Overlapping markers are detected by projecting their lat/lng into
+screen-space pixels after every zoom and grouping any that fall within ~36 px
+of each other.
+
+## Timeline
+
+If at least two of your located photos have EXIF timestamps and those
+timestamps are not all identical, a **timeline bar** appears at the bottom
+of the map.
+
+- **Slider** — drag the thumb to set a cutoff time. Only photos taken at or
+  before that moment stay visible. Photos without a timestamp are hidden
+  while the filter is active.
+- **▶ Play / ⏸ Pause** — autoplays the slider from the earliest to the
+  latest photo over about 9 seconds, revealing markers as their timestamps
+  pass. Click again to pause; dragging the slider also pauses.
+- **Show All** — clears the filter and brings every photo back, including
+  those without timestamps. The button is highlighted whenever the filter
+  is active.
+
+## Sharing
+
+Once you have at least one located photo, the **Share** button (top right)
+opens a menu with three formats:
+
+- **PNG image** — a clean snapshot of the current map view (cursor
+  coordinates and zoom controls are hidden during capture). Fastest option,
+  smallest file, works everywhere. Use this for static posts.
+- **Animated GIF** — drives the timeline cutoff through 30 frames from the
+  earliest to the latest photo, captures each frame, then encodes a GIF in
+  web workers. Slowest option, but plays inline in chat apps and on social
+  platforms that don't accept video.
+- **WebM video** — same 48-frame capture, then encoded via
+  `MediaRecorder` + `canvas.captureStream`. Smaller files than GIF, but not
+  every platform accepts WebM (notably iOS share sheets).
+
+A progress dialog shows captured-frame and encoding status, and has a
+**Cancel** button. When ready, the file is offered to the native share sheet
+via `navigator.share` if your browser supports file sharing; otherwise it
+downloads as `cartograph-…`.
+
+GIF and WebM both require **at least two timestamped photos** with different
+timestamps. PNG works on any located photo.
 
 ## Importing from Google Drive
 
@@ -90,13 +138,18 @@ the project; or the API key has restrictions that block this origin.
 
 Cartograph runs entirely in your browser. Locally-added photos and their GPS
 data are never sent to any server. The only network requests the app makes
-are for the CDN-hosted libraries (Leaflet, exifr) and the map tiles
-themselves (CartoDB / OpenStreetMap).
+are for the CDN-hosted libraries (Leaflet, exifr, html-to-image, gif.js) and
+the map tiles themselves (CartoDB / OpenStreetMap).
 
 If you use the **Google Drive import** feature, your Drive API key and the
 folder ID are sent to `googleapis.com` in order to list and download the
 images — that is unavoidable, but the requests go directly from your browser
 to Google.
+
+The **Share** feature renders images, GIFs, and videos locally; nothing is
+uploaded. If your browser exposes the Web Share API (`navigator.share`) and
+you choose to share through it, only the destination app you pick from the
+share sheet receives the file.
 
 ## License
 

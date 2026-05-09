@@ -401,6 +401,89 @@
     text-transform: uppercase; letter-spacing: 0.06em;
   }
 
+  /* Share menu */
+  .share-menu { position: relative; }
+  .share-dropdown {
+    position: absolute; top: calc(100% + 6px); right: 0;
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 10px 30px rgba(26, 31, 46, 0.18);
+    z-index: 200;
+    min-width: 220px;
+  }
+  .share-dropdown[hidden] { display: none; }
+  .share-dropdown button {
+    display: block; width: 100%; padding: 10px 14px;
+    background: transparent; border: none;
+    text-align: left; cursor: pointer;
+    border-bottom: 1px solid var(--line);
+    transition: background 0.12s ease;
+  }
+  .share-dropdown button:last-child { border-bottom: none; }
+  .share-dropdown button:hover { background: var(--accent-soft); }
+  .share-dropdown .share-title {
+    display: block;
+    font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--ink); font-weight: 500;
+  }
+  .share-dropdown button:hover .share-title { color: var(--accent); }
+  .share-dropdown .share-desc {
+    display: block;
+    font-family: var(--sans); font-size: 11px;
+    color: var(--ink-muted);
+    margin-top: 3px;
+  }
+
+  /* Capture mode hides UI overlays during share rendering */
+  .map-container.capturing .map-overlay-tag,
+  .map-container.capturing .map-controls {
+    display: none !important;
+  }
+
+  /* Share progress overlay */
+  .share-progress {
+    position: fixed; inset: 0;
+    background: rgba(26, 31, 46, 0.55);
+    z-index: 10000;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .share-progress[hidden] { display: none; }
+  .share-progress-card {
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    padding: 28px 32px;
+    min-width: 320px; max-width: 420px;
+    text-align: center;
+  }
+  .share-progress-title {
+    font-family: var(--serif); font-size: 22px;
+    margin-bottom: 6px;
+  }
+  .share-progress-text {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--ink-soft);
+    margin-bottom: 18px; min-height: 16px;
+  }
+  .share-progress-bar {
+    height: 4px; background: var(--line-strong);
+    margin-bottom: 18px;
+    overflow: hidden;
+  }
+  .share-progress-fill {
+    height: 100%; background: var(--accent);
+    width: 0%; transition: width 0.15s ease;
+  }
+  .share-progress-cancel {
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    background: transparent; border: 1px solid var(--ink);
+    color: var(--ink); padding: 8px 16px;
+    cursor: pointer;
+  }
+  .share-progress-cancel:hover { background: var(--ink); color: var(--bg); }
+
   /* Timeline bar */
   .timeline {
     position: absolute; left: 18px; right: 18px; bottom: 36px;
@@ -520,6 +603,23 @@
       <div class="stat"><span class="stat-num" id="stat-pending">0</span><span class="stat-label">Need GPS</span></div>
     </div>
     <div class="header-actions">
+      <div class="share-menu">
+        <button class="btn ghost" id="share-btn" disabled>Share</button>
+        <div class="share-dropdown" id="share-dropdown" hidden>
+          <button data-share="png" type="button">
+            <span class="share-title">PNG image</span>
+            <span class="share-desc">Snapshot of the current map view</span>
+          </button>
+          <button data-share="gif" type="button">
+            <span class="share-title">Animated GIF</span>
+            <span class="share-desc">Records timeline playback (~30s)</span>
+          </button>
+          <button data-share="webm" type="button">
+            <span class="share-title">WebM video</span>
+            <span class="share-desc">Records timeline playback (~15s)</span>
+          </button>
+        </div>
+      </div>
       <button class="btn ghost" id="export-btn" disabled>Export GeoJSON</button>
       <button class="btn ghost" id="clear-btn" disabled>Clear All</button>
     </div>
@@ -600,6 +700,15 @@
 
 <div class="toast" id="toast"></div>
 
+<div class="share-progress" id="share-progress" hidden>
+  <div class="share-progress-card">
+    <div class="share-progress-title" id="share-progress-title">Preparing…</div>
+    <div class="share-progress-text" id="share-progress-text">—</div>
+    <div class="share-progress-bar"><div class="share-progress-fill" id="share-progress-fill"></div></div>
+    <button class="share-progress-cancel" id="share-progress-cancel" type="button">Cancel</button>
+  </div>
+</div>
+
 <script>
 // Visible error reporter
 (function() {
@@ -623,6 +732,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
 
 <script>
 'use strict';
@@ -647,6 +758,7 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
   subdomains: 'abcd',
   maxZoom: 19,
+  crossOrigin: '',
 }).addTo(map);
 
 const mapCoordEl = document.getElementById('map-coord');
@@ -1079,6 +1191,7 @@ function render() {
 
   clearBtn.disabled = total === 0;
   exportBtn.disabled = mapped === 0;
+  shareBtn.disabled = mapped === 0;
   emptyState.style.display = total === 0 ? 'block' : 'none';
 
   const existing = photoList.querySelectorAll('.photo-item');
@@ -1302,6 +1415,273 @@ $('timeline-play').addEventListener('click', () => {
   else startAutoplay();
 });
 $('timeline-show-all').addEventListener('click', showAllTimeline);
+
+// ─── Share ─────────────────────────────────────────────────────────────────
+const mapContainer = document.querySelector('.map-container');
+const shareBtn = $('share-btn');
+const shareDropdown = $('share-dropdown');
+const shareProgress = $('share-progress');
+const shareProgressTitle = $('share-progress-title');
+const shareProgressText = $('share-progress-text');
+const shareProgressFill = $('share-progress-fill');
+const shareProgressCancel = $('share-progress-cancel');
+
+let shareCancelled = false;
+
+function setShareProgress(title, text, pct) {
+  shareProgressTitle.textContent = title;
+  shareProgressText.textContent = text;
+  shareProgressFill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+}
+
+function openShareProgress(title) {
+  shareCancelled = false;
+  setShareProgress(title, '—', 0);
+  shareProgress.hidden = false;
+}
+
+function closeShareProgress() {
+  shareProgress.hidden = true;
+}
+
+shareProgressCancel.addEventListener('click', () => { shareCancelled = true; });
+
+shareBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  shareDropdown.hidden = !shareDropdown.hidden;
+});
+
+document.addEventListener('click', (e) => {
+  if (!shareDropdown.hidden && !e.target.closest('.share-menu')) {
+    shareDropdown.hidden = true;
+  }
+});
+
+shareDropdown.querySelectorAll('button[data-share]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    shareDropdown.hidden = true;
+    const kind = btn.dataset.share;
+    if (kind === 'png') sharePng();
+    else if (kind === 'gif') shareTimeline('gif');
+    else if (kind === 'webm') shareTimeline('webm');
+  });
+});
+
+async function saveOrShareBlob(blob, filename) {
+  const file = new File([blob], filename, { type: blob.type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: 'Cartograph' });
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function nextPaint() {
+  return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+}
+
+async function rasterizeMap() {
+  return await htmlToImage.toCanvas(mapContainer, {
+    pixelRatio: 1,
+    cacheBust: false,
+    backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--map-water').trim() || '#d6cdb8',
+  });
+}
+
+async function sharePng() {
+  if (state.photos.filter((p) => p.hasGps).length === 0) {
+    showToast('Add at least one located photo to share');
+    return;
+  }
+  openShareProgress('Rendering image…');
+  try {
+    setShareProgress('Rendering image…', 'Capturing the current map view', 30);
+    mapContainer.classList.add('capturing');
+    await nextPaint();
+    await new Promise((r) => setTimeout(r, 80));
+    const canvas = await rasterizeMap();
+    setShareProgress('Encoding…', 'Compressing PNG', 80);
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+    if (!blob) throw new Error('Failed to encode PNG');
+    setShareProgress('Done', 'Opening share sheet…', 100);
+    await saveOrShareBlob(blob, `cartograph-${Date.now()}.png`);
+    showToast('Image ready');
+  } catch (err) {
+    console.error(err);
+    showToast('Could not create image: ' + err.message);
+  } finally {
+    mapContainer.classList.remove('capturing');
+    closeShareProgress();
+  }
+}
+
+let gifWorkerUrlCache = null;
+async function getGifWorkerUrl() {
+  if (gifWorkerUrlCache) return gifWorkerUrlCache;
+  const res = await fetch('https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js');
+  if (!res.ok) throw new Error('Failed to fetch gif worker');
+  const text = await res.text();
+  const blob = new Blob([text], { type: 'application/javascript' });
+  gifWorkerUrlCache = URL.createObjectURL(blob);
+  return gifWorkerUrlCache;
+}
+
+async function captureTimelineFrames(totalFrames, onProgress) {
+  const range = timelineRange();
+  if (!range) throw new Error('Need at least 2 timestamped photos');
+
+  const saved = {
+    active: state.timeline.active,
+    cutoff: state.timeline.cutoff,
+    playing: state.timeline.playing,
+  };
+  if (state.timeline.playing) stopAutoplay();
+  state.timeline.active = true;
+
+  mapContainer.classList.add('capturing');
+
+  const frames = [];
+  try {
+    for (let i = 0; i < totalFrames; i++) {
+      if (shareCancelled) throw new Error('cancelled');
+      const progress = totalFrames === 1 ? 1 : i / (totalFrames - 1);
+      state.timeline.cutoff = range.min + progress * (range.max - range.min);
+      redrawMarkers();
+      updateTimelineUI();
+      await nextPaint();
+      await new Promise((r) => setTimeout(r, 60));
+      const canvas = await rasterizeMap();
+      frames.push(canvas);
+      onProgress(i + 1, totalFrames);
+    }
+  } finally {
+    state.timeline.active = saved.active;
+    state.timeline.cutoff = saved.cutoff;
+    redrawMarkers();
+    updateTimelineUI();
+    mapContainer.classList.remove('capturing');
+  }
+
+  return frames;
+}
+
+async function shareTimeline(format) {
+  const range = timelineRange();
+  if (!range) {
+    showToast('Need 2+ timestamped photos for a timeline recording');
+    return;
+  }
+
+  const totalFrames = format === 'gif' ? 30 : 48;
+  const fps = format === 'gif' ? 8 : 10;
+
+  openShareProgress(format === 'gif' ? 'Recording GIF…' : 'Recording video…');
+
+  try {
+    const frames = await captureTimelineFrames(totalFrames, (done, total) => {
+      setShareProgress(
+        format === 'gif' ? 'Recording GIF…' : 'Recording video…',
+        `Captured frame ${done} of ${total}`,
+        (done / total) * 60,
+      );
+    });
+
+    if (shareCancelled) return;
+
+    let blob, ext, mime;
+    if (format === 'gif') {
+      blob = await encodeGif(frames, fps, (p) => {
+        setShareProgress('Encoding GIF…', `${Math.round(p * 100)}% done`, 60 + p * 40);
+      });
+      ext = 'gif'; mime = 'image/gif';
+    } else {
+      blob = await encodeWebm(frames, fps, (p) => {
+        setShareProgress('Encoding video…', `${Math.round(p * 100)}% done`, 60 + p * 40);
+      });
+      ext = 'webm'; mime = 'video/webm';
+    }
+
+    if (shareCancelled) return;
+
+    setShareProgress('Done', 'Opening share sheet…', 100);
+    await saveOrShareBlob(blob, `cartograph-timeline-${Date.now()}.${ext}`);
+    showToast(`${format.toUpperCase()} ready`);
+  } catch (err) {
+    if (err.message !== 'cancelled') {
+      console.error(err);
+      showToast('Recording failed: ' + err.message);
+    }
+  } finally {
+    closeShareProgress();
+  }
+}
+
+async function encodeGif(frames, fps, onProgress) {
+  const workerUrl = await getGifWorkerUrl();
+  return new Promise((resolve, reject) => {
+    const w = frames[0].width;
+    const h = frames[0].height;
+    const gif = new GIF({
+      workers: 2,
+      quality: 10,
+      width: w,
+      height: h,
+      workerScript: workerUrl,
+    });
+    const delay = Math.round(1000 / fps);
+    for (const c of frames) gif.addFrame(c, { delay, copy: true });
+    gif.on('progress', onProgress);
+    gif.on('finished', resolve);
+    gif.on('abort', () => reject(new Error('cancelled')));
+    gif.render();
+  });
+}
+
+async function encodeWebm(frames, fps, onProgress) {
+  const w = frames[0].width;
+  const h = frames[0].height;
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const ctx = out.getContext('2d');
+
+  const stream = out.captureStream(fps);
+  const mimeCandidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  const mimeType = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+  const stopped = new Promise((r) => { recorder.onstop = r; });
+  recorder.start();
+
+  ctx.drawImage(frames[0], 0, 0);
+  await new Promise((r) => setTimeout(r, 200));
+
+  for (let i = 0; i < frames.length; i++) {
+    if (shareCancelled) { recorder.stop(); throw new Error('cancelled'); }
+    ctx.drawImage(frames[i], 0, 0);
+    onProgress(i / frames.length);
+    await new Promise((r) => setTimeout(r, 1000 / fps));
+  }
+  ctx.drawImage(frames[frames.length - 1], 0, 0);
+  await new Promise((r) => setTimeout(r, 400));
+
+  recorder.stop();
+  await stopped;
+  onProgress(1);
+  return new Blob(chunks, { type: mimeType.split(';')[0] });
+}
 
 // Google Drive import
 const DRIVE_KEY_STORAGE = 'cartograph_drive_key';

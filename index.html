@@ -402,13 +402,13 @@
   }
 
   /* Share menu */
-  .share-menu { position: relative; }
+  .share-menu { position: relative; z-index: 5000; }
   .share-dropdown {
     position: absolute; top: calc(100% + 6px); right: 0;
     background: var(--bg);
     border: 1px solid var(--line-strong);
     box-shadow: 0 10px 30px rgba(26, 31, 46, 0.18);
-    z-index: 200;
+    z-index: 5000;
     min-width: 220px;
   }
   .share-dropdown[hidden] { display: none; }

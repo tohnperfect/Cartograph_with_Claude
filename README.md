@@ -48,7 +48,7 @@ from CDNs at runtime.
 | Map rendering       | [Leaflet](https://leafletjs.com) 1.9.4                                   |
 | Tile source         | CartoDB Positron (with sepia CSS filter)                                 |
 | EXIF extraction     | [exifr](https://github.com/MikeKovarik/exifr) 7.1.3                      |
-| DOM → canvas        | [html-to-image](https://github.com/bubkoo/html-to-image) 1.11.13         |
+| DOM → canvas        | [html2canvas](https://html2canvas.hertzen.com/) 1.4.1                    |
 | GIF encoding        | [gif.js](https://github.com/jnordberg/gif.js) 0.2.0                      |
 | Video encoding      | Native `MediaRecorder` + `canvas.captureStream`                          |
 | Everything else     | Vanilla HTML / CSS / JavaScript                                          |
@@ -138,7 +138,7 @@ the project; or the API key has restrictions that block this origin.
 
 Cartograph runs entirely in your browser. Locally-added photos and their GPS
 data are never sent to any server. The only network requests the app makes
-are for the CDN-hosted libraries (Leaflet, exifr, html-to-image, gif.js) and
+are for the CDN-hosted libraries (Leaflet, exifr, html2canvas, gif.js) and
 the map tiles themselves (CartoDB / OpenStreetMap).
 
 If you use the **Google Drive import** feature, your Drive API key and the

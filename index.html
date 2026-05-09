@@ -401,6 +401,75 @@
     text-transform: uppercase; letter-spacing: 0.06em;
   }
 
+  /* Timeline bar */
+  .timeline {
+    position: absolute; left: 18px; right: 18px; bottom: 36px;
+    z-index: 1000;
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    padding: 10px 14px;
+    display: flex; align-items: center; gap: 14px;
+    box-shadow: 0 4px 14px rgba(26, 31, 46, 0.08);
+  }
+  .timeline[hidden] { display: none; }
+  .timeline-btn {
+    width: 32px; height: 32px;
+    background: var(--ink); color: var(--bg);
+    border: 1px solid var(--ink);
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+  }
+  .timeline-btn:hover { background: var(--accent); border-color: var(--accent); }
+  .timeline-btn.show-all {
+    width: auto; padding: 0 14px;
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    background: transparent; color: var(--ink);
+  }
+  .timeline-btn.show-all:hover { background: var(--ink); color: var(--bg); }
+  .timeline-btn.show-all.armed { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .timeline-slider {
+    flex: 1; min-width: 80px;
+    -webkit-appearance: none; appearance: none;
+    height: 4px;
+    background: var(--line-strong);
+    outline: none;
+    cursor: pointer;
+    border-radius: 0;
+  }
+  .timeline-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(26, 31, 46, 0.3);
+  }
+  .timeline-slider::-moz-range-thumb {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(26, 31, 46, 0.3);
+  }
+  .timeline-label {
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--ink-soft);
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 140px;
+    text-align: center;
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    padding: 0 14px;
+  }
+  .timeline-label.muted { color: var(--ink-muted); }
+
   /* Leaflet attribution restyle to match palette */
   .leaflet-control-attribution {
     font-family: var(--mono);
@@ -519,6 +588,12 @@
         <button id="zoom-reset" title="Reset view">⌖</button>
       </div>
       <div id="map"></div>
+      <div class="timeline" id="timeline" hidden>
+        <button class="timeline-btn" id="timeline-play" type="button" title="Autoplay">▶</button>
+        <input type="range" min="0" max="1000" value="1000" step="1" class="timeline-slider" id="timeline-slider" aria-label="Timeline">
+        <div class="timeline-label muted" id="timeline-label">—</div>
+        <button class="timeline-btn show-all" id="timeline-show-all" type="button">Show All</button>
+      </div>
     </div>
   </main>
 </div>
@@ -552,7 +627,10 @@
 <script>
 'use strict';
 
-const state = { photos: [], activeId: null, nextId: 1 };
+const state = {
+  photos: [], activeId: null, nextId: 1,
+  timeline: { active: false, cutoff: null, playing: false, _timer: null },
+};
 
 const DEFAULT_VIEW = { center: [20, 0], zoom: 2 };
 
@@ -773,9 +851,134 @@ function buildPopupHtml(photo) {
   `;
 }
 
+function photoTime(p) {
+  if (!p.timestamp) return NaN;
+  const t = new Date(p.timestamp).getTime();
+  return isNaN(t) ? NaN : t;
+}
+
+function timelineRange() {
+  const times = [];
+  for (const p of state.photos) {
+    if (!p.hasGps) continue;
+    const t = photoTime(p);
+    if (!isNaN(t)) times.push(t);
+  }
+  if (times.length < 2) return null;
+  const min = Math.min(...times);
+  const max = Math.max(...times);
+  if (min === max) return null;
+  return { min, max };
+}
+
+function visibleLocatedPhotos() {
+  const all = state.photos.filter((p) => p.hasGps);
+  if (!state.timeline.active || state.timeline.cutoff == null) return all;
+  return all.filter((p) => {
+    const t = photoTime(p);
+    return !isNaN(t) && t <= state.timeline.cutoff;
+  });
+}
+
+function formatTimelineDate(ms) {
+  const d = new Date(ms);
+  return d.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function updateTimelineUI() {
+  const timelineEl = $('timeline');
+  const range = timelineRange();
+  if (!range) {
+    timelineEl.hidden = true;
+    if (state.timeline.playing) stopAutoplay();
+    state.timeline.active = false;
+    state.timeline.cutoff = null;
+    return;
+  }
+
+  timelineEl.hidden = false;
+  const slider = $('timeline-slider');
+  const label = $('timeline-label');
+  const playBtn = $('timeline-play');
+  const showAllBtn = $('timeline-show-all');
+
+  if (state.timeline.cutoff != null) {
+    state.timeline.cutoff = Math.max(range.min, Math.min(range.max, state.timeline.cutoff));
+  }
+
+  const cutoff = state.timeline.active && state.timeline.cutoff != null
+    ? state.timeline.cutoff
+    : range.max;
+  const span = range.max - range.min || 1;
+  const value = ((cutoff - range.min) / span) * 1000;
+
+  if (document.activeElement !== slider) slider.value = String(value);
+
+  if (state.timeline.active) {
+    label.textContent = formatTimelineDate(cutoff);
+    label.classList.remove('muted');
+    showAllBtn.classList.add('armed');
+  } else {
+    label.textContent = `${formatTimelineDate(range.min)}  →  ${formatTimelineDate(range.max)}`;
+    label.classList.add('muted');
+    showAllBtn.classList.remove('armed');
+  }
+
+  playBtn.textContent = state.timeline.playing ? '⏸' : '▶';
+  playBtn.title = state.timeline.playing ? 'Pause' : 'Autoplay';
+}
+
+const AUTOPLAY_DURATION_MS = 9000;
+const AUTOPLAY_TICK_MS = 50;
+
+function startAutoplay() {
+  const range = timelineRange();
+  if (!range) return;
+  stopAutoplay();
+
+  if (!state.timeline.active || state.timeline.cutoff == null || state.timeline.cutoff >= range.max) {
+    state.timeline.cutoff = range.min;
+    state.timeline.active = true;
+  }
+
+  state.timeline.playing = true;
+  const stepValue = ((range.max - range.min) / AUTOPLAY_DURATION_MS) * AUTOPLAY_TICK_MS;
+
+  state.timeline._timer = setInterval(() => {
+    state.timeline.cutoff = Math.min(state.timeline.cutoff + stepValue, range.max);
+    redrawMarkers();
+    updateTimelineUI();
+    if (state.timeline.cutoff >= range.max) stopAutoplay();
+  }, AUTOPLAY_TICK_MS);
+
+  updateTimelineUI();
+}
+
+function stopAutoplay() {
+  if (state.timeline._timer) clearInterval(state.timeline._timer);
+  state.timeline._timer = null;
+  state.timeline.playing = false;
+  updateTimelineUI();
+}
+
+function showAllTimeline() {
+  stopAutoplay();
+  state.timeline.active = false;
+  state.timeline.cutoff = null;
+  redrawMarkers();
+  updateTimelineUI();
+}
+
 function redrawMarkers() {
   clearFan();
-  const located = new Map(state.photos.filter((p) => p.hasGps).map((p) => [p.id, p]));
+  const located = new Map(visibleLocatedPhotos().map((p) => [p.id, p]));
+
+  if (state.activeId != null && !located.has(state.activeId)) {
+    state.activeId = null;
+  }
 
   for (const [id, marker] of markers) {
     if (!located.has(id)) {
@@ -944,6 +1147,8 @@ function render() {
       setManualLocation(id, lat, lng);
     });
   });
+
+  updateTimelineUI();
 }
 
 async function addFiles(files) {
@@ -1013,8 +1218,11 @@ function removePhoto(id) {
 function clearAll() {
   if (state.photos.length === 0) return;
   if (!confirm('Remove all photos?')) return;
+  stopAutoplay();
   state.photos = [];
   state.activeId = null;
+  state.timeline.active = false;
+  state.timeline.cutoff = null;
   map.closePopup();
   render();
   redrawMarkers();
@@ -1076,6 +1284,24 @@ exportBtn.addEventListener('click', exportGeoJson);
 $('zoom-in').addEventListener('click', () => map.zoomIn());
 $('zoom-out').addEventListener('click', () => map.zoomOut());
 $('zoom-reset').addEventListener('click', resetView);
+
+// Timeline controls
+const timelineSlider = $('timeline-slider');
+timelineSlider.addEventListener('input', () => {
+  const range = timelineRange();
+  if (!range) return;
+  if (state.timeline.playing) stopAutoplay();
+  state.timeline.active = true;
+  const span = range.max - range.min || 1;
+  state.timeline.cutoff = range.min + (Number(timelineSlider.value) / 1000) * span;
+  redrawMarkers();
+  updateTimelineUI();
+});
+$('timeline-play').addEventListener('click', () => {
+  if (state.timeline.playing) stopAutoplay();
+  else startAutoplay();
+});
+$('timeline-show-all').addEventListener('click', showAllTimeline);
 
 // Google Drive import
 const DRIVE_KEY_STORAGE = 'cartograph_drive_key';
